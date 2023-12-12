@@ -49,7 +49,7 @@ type tempG2 struct {
 
 // G2 is struct for G2 group.
 type G2 struct {
-	f *fp2
+	F *fp2
 	tempG2
 }
 
@@ -80,11 +80,11 @@ func (g *G2) Q() *big.Int {
 }
 
 func (g *G2) fromBytesUnchecked(in []byte) (*PointG2, error) {
-	p0, err := g.f.fromBytes(in[:96])
+	p0, err := g.F.fromBytes(in[:96])
 	if err != nil {
 		return nil, err
 	}
-	p1, err := g.f.fromBytes(in[96:])
+	p1, err := g.F.fromBytes(in[96:])
 	if err != nil {
 		return nil, err
 	}
@@ -101,11 +101,11 @@ func (g *G2) FromBytes(in []byte) (*PointG2, error) {
 	if len(in) != 192 {
 		return nil, errors.New("input string should be equal or larger than 192")
 	}
-	p0, err := g.f.fromBytes(in[:96])
+	p0, err := g.F.fromBytes(in[:96])
 	if err != nil {
 		return nil, err
 	}
-	p1, err := g.f.fromBytes(in[96:])
+	p1, err := g.F.fromBytes(in[96:])
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +159,8 @@ func (g *G2) ToBytes(p *PointG2) []byte {
 		return out
 	}
 	g.Affine(p)
-	copy(out[:96], g.f.toBytes(&p[0]))
-	copy(out[96:], g.f.toBytes(&p[1]))
+	copy(out[:96], g.F.toBytes(&p[0]))
+	copy(out[96:], g.F.toBytes(&p[1]))
 	return out
 }
 
@@ -208,14 +208,14 @@ func (g *G2) Equal(p1, p2 *PointG2) bool {
 		return g.IsZero(p1)
 	}
 	t := g.t
-	g.f.square(t[0], &p1[2])
-	g.f.square(t[1], &p2[2])
-	g.f.mul(t[2], t[0], &p2[0])
-	g.f.mul(t[3], t[1], &p1[0])
-	g.f.mul(t[0], t[0], &p1[2])
-	g.f.mul(t[1], t[1], &p2[2])
-	g.f.mul(t[1], t[1], &p1[1])
-	g.f.mul(t[0], t[0], &p2[1])
+	g.F.square(t[0], &p1[2])
+	g.F.square(t[1], &p2[2])
+	g.F.mul(t[2], t[0], &p2[0])
+	g.F.mul(t[3], t[1], &p1[0])
+	g.F.mul(t[0], t[0], &p1[2])
+	g.F.mul(t[1], t[1], &p2[2])
+	g.F.mul(t[1], t[1], &p1[1])
+	g.F.mul(t[0], t[0], &p2[1])
 	return t[0].equal(t[1]) && t[2].equal(t[3])
 }
 
@@ -232,14 +232,14 @@ func (g *G2) IsOnCurve(p *PointG2) bool {
 		return true
 	}
 	t := g.t
-	g.f.square(t[0], &p[1])
-	g.f.square(t[1], &p[0])
-	g.f.mul(t[1], t[1], &p[0])
-	g.f.square(t[2], &p[2])
-	g.f.square(t[3], t[2])
-	g.f.mul(t[2], t[2], t[3])
-	g.f.mul(t[2], b2, t[2])
-	g.f.add(t[1], t[1], t[2])
+	g.F.square(t[0], &p[1])
+	g.F.square(t[1], &p[0])
+	g.F.mul(t[1], t[1], &p[0])
+	g.F.square(t[2], &p[2])
+	g.F.square(t[3], t[2])
+	g.F.mul(t[2], t[2], t[3])
+	g.F.mul(t[2], b2, t[2])
+	g.F.add(t[1], t[1], t[2])
 	return t[0].equal(t[1])
 }
 
@@ -255,11 +255,11 @@ func (g *G2) Affine(p *PointG2) *PointG2 {
 	}
 	if !g.IsAffine(p) {
 		t := g.t
-		g.f.inverse(t[0], &p[2])
-		g.f.square(t[1], t[0])
-		g.f.mul(&p[0], &p[0], t[1])
-		g.f.mul(t[0], t[0], t[1])
-		g.f.mul(&p[1], &p[1], t[0])
+		g.F.inverse(t[0], &p[2])
+		g.F.square(t[1], t[0])
+		g.F.mul(&p[0], &p[0], t[1])
+		g.F.mul(t[0], t[0], t[1])
+		g.F.mul(&p[1], &p[1], t[0])
 		p[2].one()
 	}
 	return p
@@ -275,41 +275,41 @@ func (g *G2) Add(r, p1, p2 *PointG2) *PointG2 {
 		return r.Set(p1)
 	}
 	t := g.t
-	g.f.square(t[7], &p1[2])
-	g.f.mul(t[1], &p2[0], t[7])
-	g.f.mul(t[2], &p1[2], t[7])
-	g.f.mul(t[0], &p2[1], t[2])
-	g.f.square(t[8], &p2[2])
-	g.f.mul(t[3], &p1[0], t[8])
-	g.f.mul(t[4], &p2[2], t[8])
-	g.f.mul(t[2], &p1[1], t[4])
+	g.F.square(t[7], &p1[2])
+	g.F.mul(t[1], &p2[0], t[7])
+	g.F.mul(t[2], &p1[2], t[7])
+	g.F.mul(t[0], &p2[1], t[2])
+	g.F.square(t[8], &p2[2])
+	g.F.mul(t[3], &p1[0], t[8])
+	g.F.mul(t[4], &p2[2], t[8])
+	g.F.mul(t[2], &p1[1], t[4])
 	if t[1].equal(t[3]) {
 		if t[0].equal(t[2]) {
 			return g.Double(r, p1)
 		}
 		return r.Zero()
 	}
-	g.f.sub(t[1], t[1], t[3])
-	g.f.double(t[4], t[1])
-	g.f.square(t[4], t[4])
-	g.f.mul(t[5], t[1], t[4])
-	g.f.sub(t[0], t[0], t[2])
-	g.f.double(t[0], t[0])
-	g.f.square(t[6], t[0])
-	g.f.sub(t[6], t[6], t[5])
-	g.f.mul(t[3], t[3], t[4])
-	g.f.double(t[4], t[3])
-	g.f.sub(&r[0], t[6], t[4])
-	g.f.sub(t[4], t[3], &r[0])
-	g.f.mul(t[6], t[2], t[5])
-	g.f.double(t[6], t[6])
-	g.f.mul(t[0], t[0], t[4])
-	g.f.sub(&r[1], t[0], t[6])
-	g.f.add(t[0], &p1[2], &p2[2])
-	g.f.square(t[0], t[0])
-	g.f.sub(t[0], t[0], t[7])
-	g.f.sub(t[0], t[0], t[8])
-	g.f.mul(&r[2], t[0], t[1])
+	g.F.sub(t[1], t[1], t[3])
+	g.F.double(t[4], t[1])
+	g.F.square(t[4], t[4])
+	g.F.mul(t[5], t[1], t[4])
+	g.F.sub(t[0], t[0], t[2])
+	g.F.double(t[0], t[0])
+	g.F.square(t[6], t[0])
+	g.F.sub(t[6], t[6], t[5])
+	g.F.mul(t[3], t[3], t[4])
+	g.F.double(t[4], t[3])
+	g.F.sub(&r[0], t[6], t[4])
+	g.F.sub(t[4], t[3], &r[0])
+	g.F.mul(t[6], t[2], t[5])
+	g.F.double(t[6], t[6])
+	g.F.mul(t[0], t[0], t[4])
+	g.F.sub(&r[1], t[0], t[6])
+	g.F.add(t[0], &p1[2], &p2[2])
+	g.F.square(t[0], t[0])
+	g.F.sub(t[0], t[0], t[7])
+	g.F.sub(t[0], t[0], t[8])
+	g.F.mul(&r[2], t[0], t[1])
 	return r
 }
 
@@ -320,35 +320,35 @@ func (g *G2) Double(r, p *PointG2) *PointG2 {
 		return r.Set(p)
 	}
 	t := g.t
-	g.f.square(t[0], &p[0])
-	g.f.square(t[1], &p[1])
-	g.f.square(t[2], t[1])
-	g.f.add(t[1], &p[0], t[1])
-	g.f.square(t[1], t[1])
-	g.f.sub(t[1], t[1], t[0])
-	g.f.sub(t[1], t[1], t[2])
-	g.f.double(t[1], t[1])
-	g.f.double(t[3], t[0])
-	g.f.add(t[0], t[3], t[0])
-	g.f.square(t[4], t[0])
-	g.f.double(t[3], t[1])
-	g.f.sub(&r[0], t[4], t[3])
-	g.f.sub(t[1], t[1], &r[0])
-	g.f.double(t[2], t[2])
-	g.f.double(t[2], t[2])
-	g.f.double(t[2], t[2])
-	g.f.mul(t[0], t[0], t[1])
-	g.f.sub(t[1], t[0], t[2])
-	g.f.mul(t[0], &p[1], &p[2])
+	g.F.square(t[0], &p[0])
+	g.F.square(t[1], &p[1])
+	g.F.square(t[2], t[1])
+	g.F.add(t[1], &p[0], t[1])
+	g.F.square(t[1], t[1])
+	g.F.sub(t[1], t[1], t[0])
+	g.F.sub(t[1], t[1], t[2])
+	g.F.double(t[1], t[1])
+	g.F.double(t[3], t[0])
+	g.F.add(t[0], t[3], t[0])
+	g.F.square(t[4], t[0])
+	g.F.double(t[3], t[1])
+	g.F.sub(&r[0], t[4], t[3])
+	g.F.sub(t[1], t[1], &r[0])
+	g.F.double(t[2], t[2])
+	g.F.double(t[2], t[2])
+	g.F.double(t[2], t[2])
+	g.F.mul(t[0], t[0], t[1])
+	g.F.sub(t[1], t[0], t[2])
+	g.F.mul(t[0], &p[1], &p[2])
 	r[1].set(t[1])
-	g.f.double(&r[2], t[0])
+	g.F.double(&r[2], t[0])
 	return r
 }
 
 // Neg negates a G2 point p and assigns the result to the point at first argument.
 func (g *G2) Neg(r, p *PointG2) *PointG2 {
 	r[0].set(&p[0])
-	g.f.neg(&r[1], &p[1])
+	g.F.neg(&r[1], &p[1])
 	r[2].set(&p[2])
 	return r
 }
@@ -441,7 +441,7 @@ func (g *G2) MultiExp(r *PointG2, points []*PointG2, powers []*big.Int) (*PointG
 // https://tools.ietf.org/html/draft-irtf-cfrg-hash-to-curve-05#section-6.6.2
 // Input byte slice should be a valid field element, otherwise an error is returned.
 func (g *G2) MapToCurve(in []byte) (*PointG2, error) {
-	fp2 := g.f
+	fp2 := g.F
 	u, err := fp2.fromBytes(in)
 	if err != nil {
 		return nil, err
