@@ -453,3 +453,7 @@ func (g *G2) MapToCurve(in []byte) (*PointG2, error) {
 	g.ClearCofactor(q)
 	return g.Affine(q), nil
 }
+
+func (g *G2) GetF() *fp2 {
+    return g.f
+}
