@@ -1,459 +1,287 @@
-// Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
-//
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
 package bls12381
 
 import (
-	"errors"
-	"math"
+	"bytes"
+	"crypto/rand"
 	"math/big"
+	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
-// PointG2 is type for point in G2.
-// PointG2 is both used for Affine and Jacobian point representation.
-// If z is equal to one the point is considered as in affine form.
-type PointG2 [3]fe2
-
-// Set copies valeus of one point to another.
-func (p *PointG2) Set(p2 *PointG2) *PointG2 {
-	p[0].set(&p2[0])
-	p[1].set(&p2[1])
-	p[2].set(&p2[2])
-	return p
+func (g *G2) one() *PointG2 {
+	one, _ := g.fromBytesUnchecked(
+		common.FromHex("" +
+			"13e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e" +
+			"024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" +
+			"0606c4a02ea734cc32acd2b02bc28b99cb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be" +
+			"0ce5d527727d6e118cc9cdc6da2e351aadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801",
+		),
+	)
+	return one
 }
 
-// Zero returns G2 point in point at infinity representation
-func (p *PointG2) Zero() *PointG2 {
-	p[0].zero()
-	p[1].one()
-	p[2].zero()
-	return p
-}
-
-type tempG2 struct {
-	t [9]*fe2
-}
-
-// G2 is struct for G2 group.
-type G2 struct {
-	f *fp2
-	tempG2
-}
-
-// NewG2 constructs a new G2 instance.
-func NewG2() *G2 {
-	return newG2(nil)
-}
-
-func newG2(f *fp2) *G2 {
-	if f == nil {
-		f = newFp2()
-	}
-	t := newTempG2()
-	return &G2{f, t}
-}
-
-func newTempG2() tempG2 {
-	t := [9]*fe2{}
-	for i := 0; i < 9; i++ {
-		t[i] = &fe2{}
-	}
-	return tempG2{t}
-}
-
-// Q returns group order in big.Int.
-func (g *G2) Q() *big.Int {
-	return new(big.Int).Set(q)
-}
-
-func (g *G2) fromBytesUnchecked(in []byte) (*PointG2, error) {
-	p0, err := g.f.fromBytes(in[:96])
+func (g *G2) rand() *PointG2 {
+	k, err := rand.Int(rand.Reader, q)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	p1, err := g.f.fromBytes(in[96:])
-	if err != nil {
-		return nil, err
-	}
-	p2 := new(fe2).one()
-	return &PointG2{*p0, *p1, *p2}, nil
+	return g.MulScalar(&PointG2{}, g.one(), k)
 }
 
-// FromBytes constructs a new point given uncompressed byte input.
-// FromBytes does not take zcash flags into account.
-// Byte input expected to be larger than 96 bytes.
-// First 192 bytes should be concatenation of x and y values
-// Point (0, 0) is considered as infinity.
-func (g *G2) FromBytes(in []byte) (*PointG2, error) {
-	if len(in) != 192 {
-		return nil, errors.New("input string should be equal or larger than 192")
-	}
-	p0, err := g.f.fromBytes(in[:96])
-	if err != nil {
-		return nil, err
-	}
-	p1, err := g.f.fromBytes(in[96:])
-	if err != nil {
-		return nil, err
-	}
-	// check if given input points to infinity
-	if p0.isZero() && p1.isZero() {
-		return g.Zero(), nil
-	}
-	p2 := new(fe2).one()
-	p := &PointG2{*p0, *p1, *p2}
-	if !g.IsOnCurve(p) {
-		return nil, errors.New("point is not on curve")
-	}
-	return p, nil
-}
-
-// DecodePoint given encoded (x, y) coordinates in 256 bytes returns a valid G2 Point.
-func (g *G2) DecodePoint(in []byte) (*PointG2, error) {
-	if len(in) != 256 {
-		return nil, errors.New("invalid g2 point length")
-	}
-	pointBytes := make([]byte, 192)
-	x0Bytes, err := decodeFieldElement(in[:64])
-	if err != nil {
-		return nil, err
-	}
-	x1Bytes, err := decodeFieldElement(in[64:128])
-	if err != nil {
-		return nil, err
-	}
-	y0Bytes, err := decodeFieldElement(in[128:192])
-	if err != nil {
-		return nil, err
-	}
-	y1Bytes, err := decodeFieldElement(in[192:])
-	if err != nil {
-		return nil, err
-	}
-	copy(pointBytes[:48], x1Bytes)
-	copy(pointBytes[48:96], x0Bytes)
-	copy(pointBytes[96:144], y1Bytes)
-	copy(pointBytes[144:192], y0Bytes)
-	return g.FromBytes(pointBytes)
-}
-
-// ToBytes serializes a point into bytes in uncompressed form,
-// does not take zcash flags into account,
-// returns (0, 0) if point is infinity.
-func (g *G2) ToBytes(p *PointG2) []byte {
-	out := make([]byte, 192)
-	if g.IsZero(p) {
-		return out
-	}
-	g.Affine(p)
-	copy(out[:96], g.f.toBytes(&p[0]))
-	copy(out[96:], g.f.toBytes(&p[1]))
-	return out
-}
-
-// EncodePoint encodes a point into 256 bytes.
-func (g *G2) EncodePoint(p *PointG2) []byte {
-	// outRaw is 96 bytes
-	outRaw := g.ToBytes(p)
-	out := make([]byte, 256)
-	// encode x
-	copy(out[16:16+48], outRaw[48:96])
-	copy(out[80:80+48], outRaw[:48])
-	// encode y
-	copy(out[144:144+48], outRaw[144:])
-	copy(out[208:208+48], outRaw[96:144])
-	return out
-}
-
-// New creates a new G2 Point which is equal to zero in other words point at infinity.
-func (g *G2) New() *PointG2 {
-	return new(PointG2).Zero()
-}
-
-// Zero returns a new G2 Point which is equal to point at infinity.
-func (g *G2) Zero() *PointG2 {
-	return new(PointG2).Zero()
-}
-
-// One returns a new G2 Point which is equal to generator point.
-func (g *G2) One() *PointG2 {
-	p := &PointG2{}
-	return p.Set(&g2One)
-}
-
-// IsZero returns true if given point is equal to zero.
-func (g *G2) IsZero(p *PointG2) bool {
-	return p[2].isZero()
-}
-
-// Equal checks if given two G2 point is equal in their affine form.
-func (g *G2) Equal(p1, p2 *PointG2) bool {
-	if g.IsZero(p1) {
-		return g.IsZero(p2)
-	}
-	if g.IsZero(p2) {
-		return g.IsZero(p1)
-	}
-	t := g.t
-	g.f.square(t[0], &p1[2])
-	g.f.square(t[1], &p2[2])
-	g.f.mul(t[2], t[0], &p2[0])
-	g.f.mul(t[3], t[1], &p1[0])
-	g.f.mul(t[0], t[0], &p1[2])
-	g.f.mul(t[1], t[1], &p2[2])
-	g.f.mul(t[1], t[1], &p1[1])
-	g.f.mul(t[0], t[0], &p2[1])
-	return t[0].equal(t[1]) && t[2].equal(t[3])
-}
-
-// InCorrectSubgroup checks whether given point is in correct subgroup.
-func (g *G2) InCorrectSubgroup(p *PointG2) bool {
-	tmp := &PointG2{}
-	g.MulScalar(tmp, p, q)
-	return g.IsZero(tmp)
-}
-
-// IsOnCurve checks a G2 point is on curve.
-func (g *G2) IsOnCurve(p *PointG2) bool {
-	if g.IsZero(p) {
-		return true
-	}
-	t := g.t
-	g.f.square(t[0], &p[1])
-	g.f.square(t[1], &p[0])
-	g.f.mul(t[1], t[1], &p[0])
-	g.f.square(t[2], &p[2])
-	g.f.square(t[3], t[2])
-	g.f.mul(t[2], t[2], t[3])
-	g.f.mul(t[2], b2, t[2])
-	g.f.add(t[1], t[1], t[2])
-	return t[0].equal(t[1])
-}
-
-// IsAffine checks a G2 point whether it is in affine form.
-func (g *G2) IsAffine(p *PointG2) bool {
-	return p[2].isOne()
-}
-
-// Affine calculates affine form of given G2 point.
-func (g *G2) Affine(p *PointG2) *PointG2 {
-	if g.IsZero(p) {
-		return p
-	}
-	if !g.IsAffine(p) {
-		t := g.t
-		g.f.inverse(t[0], &p[2])
-		g.f.square(t[1], t[0])
-		g.f.mul(&p[0], &p[0], t[1])
-		g.f.mul(t[0], t[0], t[1])
-		g.f.mul(&p[1], &p[1], t[0])
-		p[2].one()
-	}
-	return p
-}
-
-// Add adds two G2 points p1, p2 and assigns the result to point at first argument.
-func (g *G2) Add(r, p1, p2 *PointG2) *PointG2 {
-	// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
-	if g.IsZero(p1) {
-		return r.Set(p2)
-	}
-	if g.IsZero(p2) {
-		return r.Set(p1)
-	}
-	t := g.t
-	g.f.square(t[7], &p1[2])
-	g.f.mul(t[1], &p2[0], t[7])
-	g.f.mul(t[2], &p1[2], t[7])
-	g.f.mul(t[0], &p2[1], t[2])
-	g.f.square(t[8], &p2[2])
-	g.f.mul(t[3], &p1[0], t[8])
-	g.f.mul(t[4], &p2[2], t[8])
-	g.f.mul(t[2], &p1[1], t[4])
-	if t[1].equal(t[3]) {
-		if t[0].equal(t[2]) {
-			return g.Double(r, p1)
+func TestG2Serialization(t *testing.T) {
+	g2 := NewG2()
+	for i := 0; i < fuz; i++ {
+		a := g2.rand()
+		buf := g2.ToBytes(a)
+		b, err := g2.FromBytes(buf)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return r.Zero()
-	}
-	g.f.sub(t[1], t[1], t[3])
-	g.f.double(t[4], t[1])
-	g.f.square(t[4], t[4])
-	g.f.mul(t[5], t[1], t[4])
-	g.f.sub(t[0], t[0], t[2])
-	g.f.double(t[0], t[0])
-	g.f.square(t[6], t[0])
-	g.f.sub(t[6], t[6], t[5])
-	g.f.mul(t[3], t[3], t[4])
-	g.f.double(t[4], t[3])
-	g.f.sub(&r[0], t[6], t[4])
-	g.f.sub(t[4], t[3], &r[0])
-	g.f.mul(t[6], t[2], t[5])
-	g.f.double(t[6], t[6])
-	g.f.mul(t[0], t[0], t[4])
-	g.f.sub(&r[1], t[0], t[6])
-	g.f.add(t[0], &p1[2], &p2[2])
-	g.f.square(t[0], t[0])
-	g.f.sub(t[0], t[0], t[7])
-	g.f.sub(t[0], t[0], t[8])
-	g.f.mul(&r[2], t[0], t[1])
-	return r
-}
-
-// Double doubles a G2 point p and assigns the result to the point at first argument.
-func (g *G2) Double(r, p *PointG2) *PointG2 {
-	// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
-	if g.IsZero(p) {
-		return r.Set(p)
-	}
-	t := g.t
-	g.f.square(t[0], &p[0])
-	g.f.square(t[1], &p[1])
-	g.f.square(t[2], t[1])
-	g.f.add(t[1], &p[0], t[1])
-	g.f.square(t[1], t[1])
-	g.f.sub(t[1], t[1], t[0])
-	g.f.sub(t[1], t[1], t[2])
-	g.f.double(t[1], t[1])
-	g.f.double(t[3], t[0])
-	g.f.add(t[0], t[3], t[0])
-	g.f.square(t[4], t[0])
-	g.f.double(t[3], t[1])
-	g.f.sub(&r[0], t[4], t[3])
-	g.f.sub(t[1], t[1], &r[0])
-	g.f.double(t[2], t[2])
-	g.f.double(t[2], t[2])
-	g.f.double(t[2], t[2])
-	g.f.mul(t[0], t[0], t[1])
-	g.f.sub(t[1], t[0], t[2])
-	g.f.mul(t[0], &p[1], &p[2])
-	r[1].set(t[1])
-	g.f.double(&r[2], t[0])
-	return r
-}
-
-// Neg negates a G2 point p and assigns the result to the point at first argument.
-func (g *G2) Neg(r, p *PointG2) *PointG2 {
-	r[0].set(&p[0])
-	g.f.neg(&r[1], &p[1])
-	r[2].set(&p[2])
-	return r
-}
-
-// Sub subtracts two G2 points p1, p2 and assigns the result to point at first argument.
-func (g *G2) Sub(c, a, b *PointG2) *PointG2 {
-	d := &PointG2{}
-	g.Neg(d, b)
-	g.Add(c, a, d)
-	return c
-}
-
-// MulScalar multiplies a point by given scalar value in big.Int and assigns the result to point at first argument.
-func (g *G2) MulScalar(c, p *PointG2, e *big.Int) *PointG2 {
-	q, n := &PointG2{}, &PointG2{}
-	n.Set(p)
-	l := e.BitLen()
-	for i := 0; i < l; i++ {
-		if e.Bit(i) == 1 {
-			g.Add(q, q, n)
+		if !g2.Equal(a, b) {
+			t.Fatal("bad serialization from/to")
 		}
-		g.Double(n, n)
 	}
-	return c.Set(q)
+	for i := 0; i < fuz; i++ {
+		a := g2.rand()
+		encoded := g2.EncodePoint(a)
+		b, err := g2.DecodePoint(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !g2.Equal(a, b) {
+			t.Fatal("bad serialization encode/decode")
+		}
+	}
 }
 
-// ClearCofactor maps given a G2 point to correct subgroup
-func (g *G2) ClearCofactor(p *PointG2) {
-	g.MulScalar(p, p, cofactorEFFG2)
+func TestG2IsOnCurve(t *testing.T) {
+	g := NewG2()
+	zero := g.Zero()
+	if !g.IsOnCurve(zero) {
+		t.Fatal("zero must be on curve")
+	}
+	one := new(fe2).One()
+	p := &PointG2{*one, *one, *one}
+	if g.IsOnCurve(p) {
+		t.Fatal("(1, 1) is not on curve")
+	}
 }
 
-// MultiExp calculates multi exponentiation. Given pairs of G2 point and scalar values
-// (P_0, e_0), (P_1, e_1), ... (P_n, e_n) calculates r = e_0 * P_0 + e_1 * P_1 + ... + e_n * P_n
-// Length of points and scalars are expected to be equal, otherwise an error is returned.
-// Result is assigned to point at first argument.
-func (g *G2) MultiExp(r *PointG2, points []*PointG2, powers []*big.Int) (*PointG2, error) {
-	if len(points) != len(powers) {
-		return nil, errors.New("point and scalar vectors should be in same length")
-	}
-	var c uint32 = 3
-	if len(powers) >= 32 {
-		c = uint32(math.Ceil(math.Log10(float64(len(powers)))))
-	}
-	bucketSize, numBits := (1<<c)-1, uint32(g.Q().BitLen())
-	windows := make([]*PointG2, numBits/c+1)
-	bucket := make([]*PointG2, bucketSize)
-	acc, sum := g.New(), g.New()
-	for i := 0; i < bucketSize; i++ {
-		bucket[i] = g.New()
-	}
-	mask := (uint64(1) << c) - 1
-	j := 0
-	var cur uint32
-	for cur <= numBits {
-		acc.Zero()
-		bucket = make([]*PointG2, (1<<c)-1)
-		for i := 0; i < len(bucket); i++ {
-			bucket[i] = g.New()
+func TestG2AdditiveProperties(t *testing.T) {
+	g := NewG2()
+	t0, t1 := g.New(), g.New()
+	zero := g.Zero()
+	for i := 0; i < fuz; i++ {
+		a, b := g.rand(), g.rand()
+		_, _, _ = b, t1, zero
+		g.Add(t0, a, zero)
+		if !g.Equal(t0, a) {
+			t.Fatal("a + 0 == a")
 		}
-		for i := 0; i < len(powers); i++ {
-			s0 := powers[i].Uint64()
-			index := uint(s0 & mask)
-			if index != 0 {
-				g.Add(bucket[index-1], bucket[index-1], points[i])
-			}
-			powers[i] = new(big.Int).Rsh(powers[i], uint(c))
+		g.Add(t0, zero, zero)
+		if !g.Equal(t0, zero) {
+			t.Fatal("0 + 0 == 0")
 		}
-		sum.Zero()
-		for i := len(bucket) - 1; i >= 0; i-- {
-			g.Add(sum, sum, bucket[i])
-			g.Add(acc, acc, sum)
+		g.Sub(t0, a, zero)
+		if !g.Equal(t0, a) {
+			t.Fatal("a - 0 == a")
 		}
-		windows[j] = g.New()
-		windows[j].Set(acc)
-		j++
-		cur += c
+		g.Sub(t0, zero, zero)
+		if !g.Equal(t0, zero) {
+			t.Fatal("0 - 0 == 0")
+		}
+		g.Neg(t0, zero)
+		if !g.Equal(t0, zero) {
+			t.Fatal("- 0 == 0")
+		}
+		g.Sub(t0, zero, a)
+		g.Neg(t0, t0)
+		if !g.Equal(t0, a) {
+			t.Fatal(" - (0 - a) == a")
+		}
+		g.Double(t0, zero)
+		if !g.Equal(t0, zero) {
+			t.Fatal("2 * 0 == 0")
+		}
+		g.Double(t0, a)
+		g.Sub(t0, t0, a)
+		if !g.Equal(t0, a) || !g.IsOnCurve(t0) {
+			t.Fatal(" (2 * a) - a == a")
+		}
+		g.Add(t0, a, b)
+		g.Add(t1, b, a)
+		if !g.Equal(t0, t1) {
+			t.Fatal("a + b == b + a")
+		}
+		g.Sub(t0, a, b)
+		g.Sub(t1, b, a)
+		g.Neg(t1, t1)
+		if !g.Equal(t0, t1) {
+			t.Fatal("a - b == - ( b - a )")
+		}
+		c := g.rand()
+		g.Add(t0, a, b)
+		g.Add(t0, t0, c)
+		g.Add(t1, a, c)
+		g.Add(t1, t1, b)
+		if !g.Equal(t0, t1) {
+			t.Fatal("(a + b) + c == (a + c ) + b")
+		}
+		g.Sub(t0, a, b)
+		g.Sub(t0, t0, c)
+		g.Sub(t1, a, c)
+		g.Sub(t1, t1, b)
+		if !g.Equal(t0, t1) {
+			t.Fatal("(a - b) - c == (a - c) -b")
+		}
 	}
-	acc.Zero()
-	for i := len(windows) - 1; i >= 0; i-- {
-		for j := uint32(0); j < c; j++ {
-			g.Double(acc, acc)
-		}
-		g.Add(acc, acc, windows[i])
-	}
-	return r.Set(acc), nil
 }
 
-// MapToCurve given a byte slice returns a valid G2 point.
-// This mapping function implements the Simplified Shallue-van de Woestijne-Ulas method.
-// https://tools.ietf.org/html/draft-irtf-cfrg-hash-to-curve-05#section-6.6.2
-// Input byte slice should be a valid field element, otherwise an error is returned.
-func (g *G2) MapToCurve(in []byte) (*PointG2, error) {
-	fp2 := g.f
-	u, err := fp2.fromBytes(in)
-	if err != nil {
-		return nil, err
+func TestG2MultiplicativeProperties(t *testing.T) {
+	g := NewG2()
+	t0, t1 := g.New(), g.New()
+	zero := g.Zero()
+	for i := 0; i < fuz; i++ {
+		a := g.rand()
+		s1, s2, s3 := randScalar(q), randScalar(q), randScalar(q)
+		sone := big.NewInt(1)
+		g.MulScalar(t0, zero, s1)
+		if !g.Equal(t0, zero) {
+			t.Fatal(" 0 ^ s == 0")
+		}
+		g.MulScalar(t0, a, sone)
+		if !g.Equal(t0, a) {
+			t.Fatal(" a ^ 1 == a")
+		}
+		g.MulScalar(t0, zero, s1)
+		if !g.Equal(t0, zero) {
+			t.Fatal(" 0 ^ s == a")
+		}
+		g.MulScalar(t0, a, s1)
+		g.MulScalar(t0, t0, s2)
+		s3.Mul(s1, s2)
+		g.MulScalar(t1, a, s3)
+		if !g.Equal(t0, t1) {
+			t.Errorf(" (a ^ s1) ^ s2 == a ^ (s1 * s2)")
+		}
+		g.MulScalar(t0, a, s1)
+		g.MulScalar(t1, a, s2)
+		g.Add(t0, t0, t1)
+		s3.Add(s1, s2)
+		g.MulScalar(t1, a, s3)
+		if !g.Equal(t0, t1) {
+			t.Errorf(" (a ^ s1) + (a ^ s2) == a ^ (s1 + s2)")
+		}
 	}
-	x, y := swuMapG2(fp2, u)
-	isogenyMapG2(fp2, x, y)
-	z := new(fe2).one()
-	q := &PointG2{*x, *y, *z}
-	g.ClearCofactor(q)
-	return g.Affine(q), nil
 }
 
-func (g *G2) GetF() *fp2 {
-    return g.f
+func TestG2MultiExpExpected(t *testing.T) {
+	g := NewG2()
+	one := g.one()
+	var scalars [2]*big.Int
+	var bases [2]*PointG2
+	scalars[0] = big.NewInt(2)
+	scalars[1] = big.NewInt(3)
+	bases[0], bases[1] = new(PointG2).Set(one), new(PointG2).Set(one)
+	expected, result := g.New(), g.New()
+	g.MulScalar(expected, one, big.NewInt(5))
+	_, _ = g.MultiExp(result, bases[:], scalars[:])
+	if !g.Equal(expected, result) {
+		t.Fatal("bad multi-exponentiation")
+	}
+}
+
+func TestG2MultiExpBatch(t *testing.T) {
+	g := NewG2()
+	one := g.one()
+	n := 1000
+	bases := make([]*PointG2, n)
+	scalars := make([]*big.Int, n)
+	// scalars: [s0,s1 ... s(n-1)]
+	// bases: [P0,P1,..P(n-1)] = [s(n-1)*G, s(n-2)*G ... s0*G]
+	for i, j := 0, n-1; i < n; i, j = i+1, j-1 {
+		scalars[j], _ = rand.Int(rand.Reader, big.NewInt(100000))
+		bases[i] = g.New()
+		g.MulScalar(bases[i], one, scalars[j])
+	}
+	// expected: s(n-1)*P0 + s(n-2)*P1 + s0*P(n-1)
+	expected, tmp := g.New(), g.New()
+	for i := 0; i < n; i++ {
+		g.MulScalar(tmp, bases[i], scalars[i])
+		g.Add(expected, expected, tmp)
+	}
+	result := g.New()
+	_, _ = g.MultiExp(result, bases, scalars)
+	if !g.Equal(expected, result) {
+		t.Fatal("bad multi-exponentiation")
+	}
+}
+
+func TestG2MapToCurve(t *testing.T) {
+	for i, v := range []struct {
+		u        []byte
+		expected []byte
+	}{
+		{
+			u:        make([]byte, 96),
+			expected: common.FromHex("0a67d12118b5a35bb02d2e86b3ebfa7e23410db93de39fb06d7025fa95e96ffa428a7a27c3ae4dd4b40bd251ac658892" + "018320896ec9eef9d5e619848dc29ce266f413d02dd31d9b9d44ec0c79cd61f18b075ddba6d7bd20b7ff27a4b324bfce" + "04c69777a43f0bda07679d5805e63f18cf4e0e7c6112ac7f70266d199b4f76ae27c6269a3ceebdae30806e9a76aadf5c" + "0260e03644d1a2c321256b3246bad2b895cad13890cbe6f85df55106a0d334604fb143c7a042d878006271865bc35941"),
+		},
+		{
+			u:        common.FromHex("025fbc07711ba267b7e70c82caa70a16fbb1d470ae24ceef307f5e2000751677820b7013ad4e25492dcf30052d3e5eca" + "0e775d7827adf385b83e20e4445bd3fab21d7b4498426daf3c1d608b9d41e9edb5eda0df022e753b8bb4bc3bb7db4914"),
+			expected: common.FromHex("0d4333b77becbf9f9dfa3ca928002233d1ecc854b1447e5a71f751c9042d000f42db91c1d6649a5e0ad22bd7bf7398b8" + "027e4bfada0b47f9f07e04aec463c7371e68f2fd0c738cd517932ea3801a35acf09db018deda57387b0f270f7a219e4d" + "0cc76dc777ea0d447e02a41004f37a0a7b1fafb6746884e8d9fc276716ccf47e4e0899548a2ec71c2bdf1a2a50e876db" + "053674cba9ef516ddc218fedb37324e6c47de27f88ab7ef123b006127d738293c0277187f7e2f80a299a24d84ed03da7"),
+		},
+		{
+			u:        common.FromHex("1870a7dbfd2a1deb74015a3546b20f598041bf5d5202997956a94a368d30d3f70f18cdaa1d33ce970a4e16af961cbdcb" + "045ab31ce4b5a8ba7c4b2851b64f063a66cd1223d3c85005b78e1beee65e33c90ceef0244e45fc45a5e1d6eab6644fdb"),
+			expected: common.FromHex("18f0f87b40af67c056915dbaf48534c592524e82c1c2b50c3734d02c0172c80df780a60b5683759298a3303c5d942778" + "09349f1cb5b2e55489dcd45a38545343451cc30a1681c57acd4fb0a6db125f8352c09f4a67eb7d1d8242cb7d3405f97b" + "10a2ba341bc689ab947b7941ce6ef39be17acaab067bd32bd652b471ab0792c53a2bd03bdac47f96aaafe96e441f63c0" + "02f2d9deb2c7742512f5b8230bf0fd83ea42279d7d39779543c1a43b61c885982b611f6a7a24b514995e8a098496b811"),
+		},
+		{
+			u:        common.FromHex("088fe329b054db8a6474f21a7fbfdf17b4c18044db299d9007af582c3d5f17d00e56d99921d4b5640fce44b05219b5de" + "0b6e6135a4cd31ba980ddbd115ac48abef7ec60e226f264d7befe002c165f3a496f36f76dd524efd75d17422558d10b4"),
+			expected: common.FromHex("19808ec5930a53c7cf5912ccce1cc33f1b3dcff24a53ce1cc4cba41fd6996dbed4843ccdd2eaf6a0cd801e562718d163" + "149fe43777d34f0d25430dea463889bd9393bdfb4932946db23671727081c629ebb98a89604f3433fba1c67d356a4af7" + "04783e391c30c83f805ca271e353582fdf19d159f6a4c39b73acbb637a9b8ac820cfbe2738d683368a7c07ad020e3e33" + "04c0d6793a766233b2982087b5f4a254f261003ccb3262ea7c50903eecef3e871d1502c293f9e063d7d293f6384f4551"),
+		},
+		{
+			u:        common.FromHex("03df16a66a05e4c1188c234788f43896e0565bfb64ac49b9639e6b284cc47dad73c47bb4ea7e677db8d496beb907fbb6" + "0f45b50647d67485295aa9eb2d91a877b44813677c67c8d35b2173ff3ba95f7bd0806f9ca8a1436b8b9d14ee81da4d7e"),
+			expected: common.FromHex("0b8e0094c886487870372eb6264613a6a087c7eb9804fab789be4e47a57b29eb19b1983a51165a1b5eb025865e9fc63a" + "0804152cbf8474669ad7d1796ab92d7ca21f32d8bed70898a748ed4e4e0ec557069003732fc86866d938538a2ae95552" + "14c80f068ece15a3936bb00c3c883966f75b4e8d9ddde809c11f781ab92d23a2d1d103ad48f6f3bb158bf3e3a4063449" + "09e5c8242dd7281ad32c03fe4af3f19167770016255fb25ad9b67ec51d62fade31a1af101e8f6172ec2ee8857662be3a"),
+		},
+	} {
+		g := NewG2()
+		p0, err := g.MapToCurve(v.u)
+		if err != nil {
+			t.Fatal("map to curve fails", i, err)
+		}
+		if !bytes.Equal(g.ToBytes(p0), v.expected) {
+			t.Fatal("map to curve fails", i)
+		}
+	}
+}
+
+func BenchmarkG2Add(t *testing.B) {
+	g2 := NewG2()
+	a, b, c := g2.rand(), g2.rand(), PointG2{}
+	t.ResetTimer()
+	for i := 0; i < t.N; i++ {
+		g2.Add(&c, a, b)
+	}
+}
+
+func BenchmarkG2Mul(t *testing.B) {
+	worstCaseScalar, _ := new(big.Int).SetString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+	g2 := NewG2()
+	a, e, c := g2.rand(), worstCaseScalar, PointG2{}
+	t.ResetTimer()
+	for i := 0; i < t.N; i++ {
+		g2.MulScalar(&c, a, e)
+	}
+}
+
+func BenchmarkG2SWUMap(t *testing.B) {
+	a := make([]byte, 96)
+	g2 := NewG2()
+	t.ResetTimer()
+	for i := 0; i < t.N; i++ {
+		_, err := g2.MapToCurve(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
