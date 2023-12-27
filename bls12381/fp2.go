@@ -73,7 +73,7 @@ func (e *fp2) zero() *fe2 {
 }
 
 func (e *fp2) one() *fe2 {
-	return new(fe2).one()
+	return new(fe2).One()
 }
 
 func (e *fp2) add(c, a, b *fe2) {
